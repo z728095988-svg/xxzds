@@ -1,0 +1,30 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {evaluateSamples} from '../src/evaluation.ts';
+const T=Date.parse('2026-11-13T00:00:00Z');
+const p=q=>({key:'ETHUSDT:SHORT',symbol:'ETHUSDT',side:'SHORT',quantity:q,entryPrice:2100,markPrice:2000,pnl:100,leverage:10,margin:200,liquidationPrice:2400});
+const snap=(source,qty,time)=>({source,sourceAt:new Date(time).toISOString(),detailAt:new Date(time).toISOString(),marginBalance:1000,positions:qty?[p(qty)]:[],detailsAligned:true});
+const pair=(q,time)=>({binance:{snapshot:snap('binance',q,time)},okx:{snapshot:snap('okx',null,time)}});
+const prior=()=>({snapshots:{binance:snap('binance','1',T),okx:snap('okx',null,T)},health:{binance:'live',okx:'live'}});
+test('initial baseline does not report existing positions as open',()=>{const r=evaluateSamples({snapshots:{},health:{}},pair('1',T),pair('1',T+21000),T+22000);assert.equal(r.changes.length,0);assert.equal(r.messages.length,0);assert.equal(r.memory.snapshots.binance.positions[0].quantity,'1');});
+test('quantity change across an hour is labelled with its observation interval',()=>{const r=evaluateSamples(prior(),pair('2',T+3600000),pair('2',T+3621000),T+3622000);assert.equal(r.changes[0].type,'add');assert.equal(r.changes[0].before,'1');assert.equal(r.changes[0].after,'2');assert.equal(r.changes[0].intervalStart,new Date(T).toISOString());assert.equal(r.changes[0].intervalEnd,new Date(T+3621000).toISOString());});
+test('unchanged quantities and changed prices do not alert',()=>{const a=pair('1',T+3600000),b=pair('1',T+3621000);b.binance.snapshot.positions[0].markPrice=1900;const r=evaluateSamples(prior(),a,b,T+3622000);assert.equal(r.changes.length,0);assert.equal(r.messages.length,0);});
+test('disagreeing samples retain the prior baseline and do not close',()=>{const r=evaluateSamples(prior(),pair(null,T+3600000),pair('1',T+3621000),T+3622000);assert.equal(r.changes.length,0);assert.equal(r.memory.snapshots.binance.positions[0].quantity,'1');assert.equal(r.memory.health.binance,'unstable');});
+test('repeated source timestamp cannot confirm a changed position',()=>{const r=evaluateSamples(prior(),pair('2',T+3600000),pair('2',T+3600000),T+3622000);assert.equal(r.changes.length,0);assert.equal(r.memory.health.binance,'unstable');});
+test('two fresh empty snapshots confirm a net close',()=>{const r=evaluateSamples(prior(),pair(null,T+3600000),pair(null,T+3621000),T+3622000);assert.equal(r.changes[0].type,'close');});
+test('source failure preserves baseline and does not repeatedly notify',()=>{const a=pair('1',T+3600000);a.binance={error:'offline'};const first=evaluateSamples(prior(),a,a,T+3622000);assert.equal(first.changes.length,0);assert.equal(first.memory.snapshots.binance.positions.length,1);assert.equal(first.messages.length,1);const second=evaluateSamples(first.memory,a,a,T+7222000);assert.equal(second.messages.length,0);});
+test('recovery after missing observations reports the actual comparison interval',()=>{const prev=prior();prev.health.binance='offline';const r=evaluateSamples(prev,pair('2',T+7200000),pair('2',T+7221000),T+7222000);assert.equal(r.messages.length,1);assert.equal(r.changes[0].intervalStart,new Date(T).toISOString());});
+test('older snapshots cannot overwrite a newer baseline',()=>{const r=evaluateSamples(prior(),pair('2',T-42000),pair('2',T-21000),T+1000);assert.equal(r.changes.length,0);assert.equal(r.memory.snapshots.binance.positions[0].quantity,'1');});
+test('a once-per-minute upstream is confirmed across two checks when the 21-second samples have the same timestamp',()=>{
+  const first=evaluateSamples(prior(),pair('2',T+60000),pair('2',T+60000),T+82000);
+  assert.equal(first.changes.length,0);
+  const second=evaluateSamples(first.memory,pair('2',T+120000),pair('2',T+120000),T+142000);
+  assert.equal(second.changes.length,1);assert.equal(second.changes[0].type,'add');
+  const third=evaluateSamples(second.memory,pair('2',T+180000),pair('2',T+180000),T+202000);
+  assert.equal(third.changes.length,0);assert.equal(third.messages.length,0);
+});
+test('a changed candidate with no advancing source timestamp remains unconfirmed across checks',()=>{
+  const first=evaluateSamples(prior(),pair('2',T+60000),pair('2',T+60000),T+82000);
+  const second=evaluateSamples(first.memory,pair('2',T+60000),pair('2',T+60000),T+142000);
+  assert.equal(second.changes.length,0);assert.equal(second.memory.health.binance,'unstable');
+});

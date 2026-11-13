@@ -1,0 +1,18 @@
+{
+  "prepared_at": "2026-11-13",
+  "runtime": "Node.js 24",
+  "check_interval_seconds": 60,
+  "confirmation_delay_seconds": 21,
+  "original_tests_passed": 37,
+  "latest_targeted_tests_passed": 14,
+  "expected_telegram_bot_username": "rdhjvcxsbot",
+  "telegram_bot_identity_verified": false,
+  "source_smoke_test": {
+    "binance": {"valid": true, "source_at": "2026-11-13T01:33:47.347Z", "position_count": 3},
+    "okx": {"valid": true, "source_at": "2026-11-13T01:33:42.777Z", "position_count": 0}
+  },
+  "external_worker_deployed": false,
+  "telegram_bound": false,
+  "telegram_delivery_verified": false,
+  "remaining": ["connect persistent hosting", "configure bot secrets", "bind owner's private Telegram chat", "verify delivery and at least two scheduled checks"]
+}
